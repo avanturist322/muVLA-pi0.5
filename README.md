@@ -457,7 +457,10 @@ export TRAIN_TASKS=shell_game_push_vla_v0,intercept_medium_vla_v0,remember_color
 
 The v3 campaign below shows the two invocations that ran on 8×H100.
 (A third config B with K=8 was also submitted in parallel; only A and C are shown here.)
-**v3 changes:** action_horizon increased to 8 (batch_size=8 per rank, global batch 64 like v2).
+**v3 changes:** action_horizon increased to 8, batch_size increased to 64 per rank
+(global batch 512, 16x v2). Launched with `torchrun`, not `python -m
+torch.distributed.launch` - the latter passes rank via a `--local-rank` CLI flag that
+`train.py`'s argparse does not define, and every rank fails at startup with it.
 
 **Plain pi0.5 — memory off (config A v3, the baseline):**
 
@@ -468,7 +471,7 @@ The v3 campaign below shows the two invocations that ran on 8×H100.
     --data-root "$PWD/data" \
     --data "$TRAIN_TASKS" \
     --output runs/config-a-nomem-v3 \
-    --batch-size 8 \
+    --batch-size 64 \
     --grad-accumulation-steps 1 \
     --action-horizon 8 \
     --max-steps 15000 \
@@ -494,7 +497,7 @@ The v3 campaign below shows the two invocations that ran on 8×H100.
     --data-root "$PWD/data" \
     --data "$TRAIN_TASKS" \
     --output runs/config-c-mem-k2-v3 \
-    --batch-size 8 \
+    --batch-size 64 \
     --grad-accumulation-steps 1 \
     --action-horizon 8 \
     --max-steps 30000 \
@@ -518,8 +521,10 @@ The v3 campaign below shows the two invocations that ran on 8×H100.
     --save-freq 7500
 ```
 
-Both v3 runs consume the same 1.53M frames in exactly **15000 optimizer steps** at
-an effective batch of 32 (A) and 64 (C) respectively. `runs/<name>/train_config.json` records the resolved
+A v3 consumes 7.68M frames (global batch 512 x 15000 steps) and C v3 consumes
+15.36M frames (global batch 512 x 30000 microsteps, K=2), both in exactly
+**15000 optimizer steps** - samples-per-update is 512 (A) and 1024 (C).
+`runs/<name>/train_config.json` records the resolved
 configuration of each, which is the thing to compare if in doubt.
 
 `--dataset-weights` takes one comma-separated weight per `--data` entry. Both runs left it
