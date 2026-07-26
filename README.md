@@ -1,21 +1,21 @@
 # pi05-mem
 
-**Recurrent memory for pi0.5.** This repository ports the memory mechanism of *mu-VLA*
-(a fork of OpenVLA-OFT) onto LeRobot's pi0.5 policy, then trains and evaluates the result
+**Recurrent memory for π₀.₅.** This repository ports the memory mechanism of *mu-VLA*
+(a fork of OpenVLA-OFT) onto LeRobot's π₀.₅ policy, then trains and evaluates the result
 on the memory-intensive robot tasks of MIKASA-Robo. The ported policy is called
-**mu-VLA(pi0.5)** throughout.
+**mu-VLA(π₀.₅)** throughout.
 
 If none of those three names mean anything yet, the 30-second version:
 
 | name | what it is |
 |---|---|
-| **pi0.5** (pi0.5, [arXiv:2504.16054](https://arxiv.org/abs/2504.16054)) | a vision-language-action (VLA) model: a PaliGemma-2B vision-language *prefix* plus a Gemma-300M *action expert* that denoises a chunk of future actions by flow matching. The implementation used here is `lerobot.policies.pi05`. |
+| **π₀.₅** (pi0.5, [arXiv:2504.16054](https://arxiv.org/abs/2504.16054)) | a vision-language-action (VLA) model: a PaliGemma-2B vision-language *prefix* plus a Gemma-300M *action expert* that denoises a chunk of future actions by flow matching. The implementation used here is `lerobot.policies.pi05`. |
 | **mu-VLA** | an OpenVLA-OFT fork that adds *recurrent memory tokens* to a VLA, so a policy can carry information across environment steps. |
 | **MIKASA-Robo** ([site](https://mikasarobo.github.io/)) | a benchmark of 23 tabletop manipulation tasks on ManiSkill 3, built so that solving them *requires* memory. |
 
 ## The problem this repo exists to solve
 
-pi0.5 is **memoryless**. Every call to the policy sees exactly one observation: the current
+π₀.₅ is **memoryless**. Every call to the policy sees exactly one observation: the current
 camera frames and the current robot state. Nothing carries over from the previous step.
 
 That is fine for "pick up the red block" and fatal for `RememberColor3-VLA-v0`, where the
@@ -24,13 +24,13 @@ disappears, and only afterwards must it reach for the cube of that colour. By th
 decision has to be made, the evidence is no longer in the observation. A memoryless policy
 can only guess.
 
-`pi05-mem` gives pi0.5 a hidden state that survives across environment steps, using the
+`pi05-mem` gives π₀.₅ a hidden state that survives across environment steps, using the
 same mechanism, the same flag names and the same defaults as mu-VLA, so a configuration
 that works in mu-VLA transfers here without translation.
 
-## mu-VLA(pi0.5) vs plain pi0.5, in one table
+## mu-VLA(π₀.₅) vs plain π₀.₅, in one table
 
-| | plain pi0.5 | mu-VLA(pi0.5) = this repo |
+| | plain π₀.₅ | mu-VLA(π₀.₅) = this repo |
 |---|---|---|
 | state across env steps | none | `num_mem_tokens` MEM vectors, carried step to step |
 | prefix sequence | `images → language (+ state token)` | `images → MEM → language (+ state token)` |
@@ -41,10 +41,10 @@ that works in mu-VLA transfers here without translation.
 | extra weights | — | one `nn.Parameter` of shape `[num_mem_tokens, 2048]` |
 
 Everything else — the flow-matching objective, the pretrained weights, the attention block
-structure, the processor pipeline — is stock pi0.5. With `use_memory=false` this repo is
-behaviourally identical to plain pi0.5: the prefix it builds is bit-for-bit the one stock
-`PI05Pytorch.embed_prefix` builds. That equivalence is what makes the A/B comparison
-meaningful.
+structure, the processor pipeline — is stock π₀.₅. With `use_memory=false` this repo is
+behaviourally identical to plain π₀.₅, asserted bit-for-bit by
+`tests/test_model_memory.py::test_disabled_memory_matches_the_stock_prefix`. That
+equivalence is what makes the A/B comparison meaningful.
 
 ## Contents
 
@@ -54,9 +54,8 @@ meaningful.
 - [Training](#training)
 - [Memory-related parameters](#memory-related-parameters)
 - [Evaluation](#evaluation)
-- [What is verified, and how](#what-is-verified-and-how)
+- [Tests](#tests)
 - [Repository layout](#repository-layout)
-- [Licence and attribution](#licence-and-attribution)
 - [Known limitations](#known-limitations)
 
 ## How the memory actually works
@@ -80,7 +79,7 @@ before the language tokens**:
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-The position is not arbitrary. pi0.5 encodes the robot's proprioceptive state as a
+The position is not arbitrary. π₀.₅ encodes the robot's proprioceptive state as a
 *discrete token inside the text prompt* (256 bins over quantile-normalised state), so
 "after vision, before language" is the same slot mu-VLA used (`vision/proprio → MEM → text`)
 and it keeps MEM ahead of the state token.
@@ -142,8 +141,8 @@ Two consequences that bite if ignored:
   `effective_accum_steps = effective_tbptt_length * grad_accumulation_steps` and
   `total_optimizer_steps = max_steps // effective_accum_steps`. So changing K alone changes
   both the effective batch size and the schedule length, and a K ablation must compensate
-  with `--grad-accumulation-steps`. Config C below does exactly that: K=2 with
-  accumulation 4, to match K=8 with accumulation 1.
+  with `--grad-accumulation-steps`. `jobs/train_config_c_mem_k2.sh` does exactly that:
+  K=2 with accumulation 4, to match K=8 with accumulation 1.
 * **Under DDP, `initial_memory` gets gradient only on ranks whose batch contained an
   episode start**, so its gradient is explicitly all-reduced
   (`_all_reduce_initial_memory_grad`), and its norm is logged as
@@ -157,8 +156,8 @@ written to memory would contain the current step's action prediction — a quant
 does not exist in that form at inference time.
 
 In OpenVLA-OFT this had to be enforced with a hand-built additive 4D mask, because OFT
-makes the whole multimodal sequence bidirectional, action tokens included. **In pi0.5 the
-invariant holds for free.** pi0.5 builds its mask from a block-boundary vector (`att_masks`
+makes the whole multimodal sequence bidirectional, action tokens included. **In π₀.₅ the
+invariant holds for free.** π₀.₅ builds its mask from a block-boundary vector (`att_masks`
 plus `make_att_2d_masks`, copied from big_vision/openpi): a token may attend only to tokens
 whose cumulative mask is ≤ its own. The whole prefix has cumulative mask 0 and the action
 suffix has 1, so the prefix — MEM included — cannot see the suffix, and the suffix sees
@@ -173,12 +172,12 @@ everything.
 
 | `--attention-mask-mode` | behaviour |
 |---|---|
-| `custom` (default) | pi0.5's native block mask, unmodified. **Nothing is patched** — there is nothing to port, the target mask already is the pretrained one. The only mode compatible with prefix KV-caching at inference. |
+| `custom` (default) | π₀.₅'s native block mask, unmodified. **Nothing is patched** — there is nothing to port, the target mask already is the pretrained one. The only mode compatible with prefix KV-caching at inference. |
 | `full` | ablation: `_open_mem_rows_to_suffix` opens **only the MEM rows** onto the action suffix. The prefix stops being cacheable, so inference takes a joint, non-cached path (`_sample_actions_joint`), roughly `num_inference_steps`× more expensive. |
 
 Note the deliberate asymmetry: mu-VLA's `full` opened the action tokens to the *entire*
 context; here only the MEM rows are opened, because opening the whole prefix would throw
-away the KV cache and destroy the pretrained block structure pi0.5 was trained with. Under
+away the KV cache and destroy the pretrained block structure π₀.₅ was trained with. Under
 flow matching the suffix at `t=1` is pure noise anyway, so `full` is semantically weaker
 here than it was in OFT. **Use `custom` unless you are deliberately running the ablation.**
 
@@ -199,7 +198,7 @@ The number of flow-matching denoising steps (`num_inference_steps=10`) does **no
 this: memory is read once from `prefix_out`, before denoising begins.
 
 Because MIKASA episodes are 11–20 steps long, the policy uses `chunk_size=5`,
-`n_action_steps=1`. The stock pi0.5 chunk of 50 is longer than an entire episode.
+`n_action_steps=1`. The stock π₀.₅ chunk of 50 is longer than an entire episode.
 
 ## Why a custom training loop and dataloader
 
@@ -230,8 +229,7 @@ from `frame_index == 0`, so a partially downloaded dataset yields real episodes 
 fictitious ones. Each item also carries the action chunk padded by repeating the last
 action past the end of an episode, plus an `action_is_pad` mask so the loss ignores it.
 
-The full write-up lives in the module docstrings of `episodic_dataset.py`, `shard.py`
-and `dataset_stats.py`.
+Full write-up: **[`docs/multitask-dataloader.md`](docs/multitask-dataloader.md)**.
 
 ## Installation
 
@@ -247,9 +245,8 @@ bash setup_env.sh
 This creates `.venv` (Python 3.12, via `uv`), installs `torch==2.7.1` /
 `torchvision==0.22.1` from the cu126 index, clones LeRobot into `.vendor/lerobot` and
 installs it **editable with the `[pi]` extra**. LeRobot has to come from source because
-pi0.5 is subclassed here, not merely configured. `ROOT` defaults to the directory the
-script lives in (override it with `PI05_MEM_ROOT`) and `UV` defaults to whatever `uv` is
-on `PATH`.
+π₀.₅ is subclassed here, not merely configured. On another machine, edit the `ROOT` and
+`UV` paths at the top of the script.
 
 > **Gotcha — no `pyproject.toml`.** `pi05-mem` itself is not a packaged project; it is
 > used straight out of `src/`. Every command therefore needs
@@ -258,8 +255,7 @@ on `PATH`.
 > export PYTHONPATH=$PWD/src HF_HOME=$PWD/.cache/hf
 > ```
 >
-> `scripts/eval_env.sh` sets this (and the simulator variables) for evaluation; for
-> training, the export block under [Training](#training) is exactly what is needed.
+> `jobs/common.sh` (training) and `scripts/eval_env.sh` (evaluation) set this for you.
 
 ### 2. Base checkpoint and tokenizer
 
@@ -268,7 +264,7 @@ on `PATH`.
 .venv/bin/python scripts/fetch_tokenizer.py
 ```
 
-> **Gotcha — the tokenizer is gated, and you do not need a token.** LeRobot's pi0.5
+> **Gotcha — the tokenizer is gated, and you do not need a token.** LeRobot's π₀.₅
 > processor hardcodes `google/paligemma-3b-pt-224`, a gated repo, so the pipeline cannot
 > start without an HF token. `scripts/fetch_tokenizer.py` downloads the canonical public
 > Big Vision SentencePiece model from `storage.googleapis.com`, uses its sha256 to verify
@@ -276,6 +272,8 @@ on `PATH`.
 > `assets/paligemma_tokenizer/`. `processor_pi05_mem.py` points the pipeline there.
 > The checksum is not decoration: a substituted tokenizer shifts token ids, the prompt
 > silently becomes different text, and the model solves a different task.
+> (`download_ckpt.sh` fetches checkpoint and tokenizer in one go, but its tokenizer half
+> goes to the gated repo — prefer the two commands above.)
 
 ### 3. Data
 
@@ -301,10 +299,9 @@ bash download_data.sh remember_color_3_vla_v0          # several names at once i
 > cameras must be pre-decoded before training.** Revisit the approach at hundreds of
 > thousands of frames.
 
-The five tasks used by the current experiment are `shell_game_push_vla_v0`,
-`intercept_medium_vla_v0`, `remember_color_5_vla_v0`, `take_it_back_vla_v0` and
-`remember_shape_and_color_3x3_vla_v0`. Everything below refers to them as
-`$TRAIN_TASKS`; export it once, see [Training](#training).
+The five tasks used by the current experiment are exported as `$TRAIN_TASKS` in
+`jobs/common.sh`: `shell_game_push_vla_v0`, `intercept_medium_vla_v0`,
+`remember_color_5_vla_v0`, `take_it_back_vla_v0`, `remember_shape_and_color_3x3_vla_v0`.
 
 ### 4. Simulators (only needed for evaluation)
 
@@ -322,12 +319,9 @@ Two more things must be on `PYTHONPATH`; both are checkouts, not pip packages:
   observation and action conventions are taken verbatim (`make_eval_env`,
   `get_mikasa_images`, `get_mikasa_proprio`, `get_language_instruction`).
 
-`scripts/eval_env.sh` wires all of it. Point it at your checkouts first: it reads
-`MU_VLA_PATH` and `MIKASA_ROBO_PATH`, and falls back to `/path/to/...` placeholders.
-**Source it, do not execute it:**
+`scripts/eval_env.sh` wires all of it. **Source it, do not execute it:**
 
 ```bash
-export MU_VLA_PATH=/path/to/mu-vla MIKASA_ROBO_PATH=/path/to/MIKASA-Robo
 source scripts/eval_env.sh mikasa     # or: libero
 ```
 
@@ -335,7 +329,7 @@ source scripts/eval_env.sh mikasa     # or: libero
 > * `VK_ICD_FILENAMES=/etc/vulkan/icd.d/nvidia_icd.json` — Vulkan is present but has no
 >   default ICD registration in this image.
 > * `SAPIEN_PHYSX_CACHE_ROOT` pointed inside the project — `$HOME` is an ephemeral
->   directory, so PhysX's default cache path vanishes between jobs.
+>   `/home/user`, so PhysX's default cache path vanishes between jobs.
 > * gymnasium 1.x removed `Wrapper.__getattr__`, which every MIKASA-Robo and ManiSkill
 >   wrapper stack relies on (`AttributeError: ... has no attribute 'device'`).
 >   `src/pi05_mem/eval/gym_compat.py` restores it in a few lines; every adapter applies it
@@ -356,7 +350,7 @@ way to confirm the simulator half of the install.
 ### Environment, once per shell
 
 ```bash
-cd /path/to/pi05-mem                 # your checkout
+cd /home/jovyan/users/echerepanov/pi05-mem   # machine-specific: substitute your checkout
 
 export PYTHONPATH=$PWD/src
 export HF_HOME=$PWD/.cache/hf
@@ -365,15 +359,10 @@ export WANDB_MODE=disabled WANDB_DISABLED=true
 export TOKENIZERS_PARALLELISM=false  # otherwise every torchrun worker warns
 ```
 
-On a machine whose `$HOME` is ephemeral, pin `TRITON_CACHE_DIR` and
-`TORCHINDUCTOR_CACHE_DIR` inside the checkout as well. Export the training mixture once,
-since every command below uses it:
-
-```bash
-export TRAIN_TASKS=shell_game_push_vla_v0,intercept_medium_vla_v0,remember_color_5_vla_v0,take_it_back_vla_v0,remember_shape_and_color_3x3_vla_v0
-```
-
-Every other path below is relative to the checkout root.
+`jobs/common.sh` exports exactly this, plus `TRITON_CACHE_DIR`, `TORCHINDUCTOR_CACHE_DIR`
+and `$TRAIN_TASKS`, for the cluster jobs; `source jobs/common.sh` after editing the `ROOT`
+line at its top is the shorter route. Every absolute path below comes from the machine
+this ran on and has to be substituted. Paths relative to the checkout root do not.
 
 ### Single-task: `RememberColor3-VLA-v0`
 
@@ -381,7 +370,7 @@ Dataset directory `data/remember_color_3_vla_v0` — 250 episodes, 3858 frames, 
 pre-decoded to `.npy` first (see [Data](#3-data)). The hyperparameters are those of the
 real 8×H100 runs; only the dataset list is narrowed to one task.
 
-**mu-VLA(pi0.5) — memory on:**
+**mu-VLA(π₀.₅) — memory on:**
 
 ```bash
 .venv/bin/torchrun --standalone --nnodes 1 --nproc-per-node 8 \
@@ -412,7 +401,7 @@ real 8×H100 runs; only the dataset list is narrowed to one task.
     --save-freq 12000
 ```
 
-**Plain pi0.5 — memory off, same budget:**
+**Plain π₀.₅ — memory off, same budget:**
 
 ```bash
 .venv/bin/torchrun --standalone --nnodes 1 --nproc-per-node 8 \
@@ -460,70 +449,76 @@ here** — the single-task runs that did happen were 200-step diagnostics (`runs
 
 `--data` takes a comma-separated list — mu-VLA's `MIKASA_ENVS` equivalent — and
 `--data-root` is optional sugar so the entries can be bare task names. The training
-mixture of the experiment is `$TRAIN_TASKS`, exported above.
+mixture of the experiment is the one exported as `$TRAIN_TASKS` by `jobs/common.sh`:
 
-The next two commands are configs B and A verbatim — the invocations that actually ran
-on 8×H100.
+```bash
+export TRAIN_TASKS=shell_game_push_vla_v0,intercept_medium_vla_v0,remember_color_5_vla_v0,take_it_back_vla_v0,remember_shape_and_color_3x3_vla_v0
+```
 
-**mu-VLA(pi0.5) — memory on (config B):**
+The v2 campaign below shows the two invocations that ran on 8×H100.
+(A third config B with K=8 was also submitted in parallel; only A and C are shown here.)
+
+**Plain π₀.₅ — memory off (config A v2, the baseline):**
 
 ```bash
 .venv/bin/torchrun --standalone --nnodes 1 --nproc-per-node 8 \
     -m pi05_mem.train \
+    --pretrained lerobot/pi05_base \
     --data-root "$PWD/data" \
     --data "$TRAIN_TASKS" \
-    --output runs/config-b-mem \
+    --output runs/config-a-nomem-v2 \
     --batch-size 4 \
+    --grad-accumulation-steps 1 \
     --action-horizon 5 \
-    --max-steps 48000 \
-    --learning-rate 2.5e-5 \
+    --max-steps 15000 \
+    --learning-rate 5e-5 \
     --lr-schedule cosine \
-    --lr-warmup-steps 300 \
+    --lr-warmup-steps 750 \
     --lr-min-ratio 0.1 \
-    --adam-beta1 0.9 --adam-beta2 0.95 --adam-eps 1e-8 --weight-decay 0.01 \
     --max-grad-norm 1.0 \
     --dtype bfloat16 \
     --gradient-checkpointing \
+    --freeze-vision-encoder \
+    --seed 42 \
+    --log-freq 20 \
+    --save-freq 3750
+```
+
+**mu-VLA(π₀.₅) — memory on, K=2 (config C v2):**
+
+```bash
+.venv/bin/torchrun --standalone --nnodes 1 --nproc-per-node 8 \
+    -m pi05_mem.train \
+    --pretrained lerobot/pi05_base \
+    --data-root "$PWD/data" \
+    --data "$TRAIN_TASKS" \
+    --output runs/config-c-mem-k2-v2 \
+    --batch-size 4 \
+    --grad-accumulation-steps 1 \
+    --action-horizon 5 \
+    --max-steps 30000 \
+    --learning-rate 5e-5 \
+    --lr-schedule cosine \
+    --lr-warmup-steps 750 \
+    --lr-min-ratio 0.1 \
+    --max-grad-norm 1.0 \
+    --dtype bfloat16 \
+    --gradient-checkpointing \
+    --freeze-vision-encoder \
     --seed 42 \
     --use-memory \
     --num-mem-tokens 64 \
     --memory-update tbptt \
-    --tbptt-length 8 \
+    --tbptt-length 2 \
     --attention-mask-mode custom \
-    --memory-log-freq 100 \
-    --memory-expensive-log-freq 1000 \
+    --memory-write-scale 1.0 \
+    --memory-init-std 0.02 \
     --log-freq 20 \
-    --save-freq 12000
+    --save-freq 7500
 ```
 
-**Plain pi0.5 — memory off (config A, the baseline):**
-
-```bash
-.venv/bin/torchrun --standalone --nnodes 1 --nproc-per-node 8 \
-    -m pi05_mem.train \
-    --data-root "$PWD/data" \
-    --data "$TRAIN_TASKS" \
-    --output runs/config-a-nomem \
-    --batch-size 4 \
-    --grad-accumulation-steps 8 \
-    --action-horizon 5 \
-    --max-steps 48000 \
-    --learning-rate 2.5e-5 \
-    --lr-schedule cosine \
-    --lr-warmup-steps 300 \
-    --lr-min-ratio 0.1 \
-    --adam-beta1 0.9 --adam-beta2 0.95 --adam-eps 1e-8 --weight-decay 0.01 \
-    --max-grad-norm 1.0 \
-    --dtype bfloat16 \
-    --gradient-checkpointing \
-    --seed 42 \
-    --log-freq 20 \
-    --save-freq 12000
-```
-
-The diff is the same one as in the single-task pair: memory flags versus
-`--grad-accumulation-steps 8`. Both runs consume 1.53M frames in 6000 optimizer steps at
-an effective batch of 256. `runs/<name>/train_config.json` records the resolved
+Both v2 runs consume the same 1.53M frames in exactly **15000 optimizer steps** at
+an effective batch of 32 (A) and 64 (C) respectively. `runs/<name>/train_config.json` records the resolved
 configuration of each, which is the thing to compare if in doubt.
 
 `--dataset-weights` takes one comma-separated weight per `--data` entry. Both runs left it
@@ -544,7 +539,7 @@ For a mixture, normalization statistics for `observation.state` and `action` are
 **exactly** from the pooled raw parquet rows of all roots and cached as
 `_combined_stats_<hash>.json` next to the datasets (delete it to force a recompute). A
 single `--data` keeps reading `meta/stats.json` verbatim. This matters more than it sounds:
-pi0.5 discretizes the normalized state into 256 bins **inside the text prompt**, so wrong
+π₀.₅ discretizes the normalized state into 256 bins **inside the text prompt**, so wrong
 quantiles are a corrupted prompt, not a mild rescaling.
 
 ### Multi-GPU
@@ -566,34 +561,50 @@ The three configurations of the current experiment, budget-matched on every axis
 not memory (1.53M frames, effective batch 256, 6000 optimizer steps, same seed, same LR
 schedule, on 8×H100):
 
-| config | what it runs |
+| script | what it runs |
 |---|---|
-| **A** | pi0.5 **without** memory. The baseline. Uses the episodic loader anyway, for fairness, and `--grad-accumulation-steps 8`. |
-| **B** | mu-VLA(pi0.5): `--num-mem-tokens 64`, TBPTT `--tbptt-length 8`, `custom` mask. K=8 already supplies the 8 microsteps per update, so no gradient accumulation. |
-| **C** | as B but `--tbptt-length 2` with `--grad-accumulation-steps 4`, so that **only** K differs from B. |
+| `jobs/train_config_a_nomem.sh` | **A** — π₀.₅ **without** memory. The baseline. Uses the episodic loader anyway, for fairness, and `--grad-accumulation-steps 8`. |
+| `jobs/train_config_b_mem.sh` | **B** — mu-VLA(π₀.₅): `--num-mem-tokens 64`, TBPTT `--tbptt-length 8`, `custom` mask. K=8 already supplies the 8 microsteps per update, so no gradient accumulation. |
+| `jobs/train_config_c_mem_k2.sh` | **C** — as B but `--tbptt-length 2` with `--grad-accumulation-steps 4`, so that **only** K differs from B. |
 
-Configs A and B are reproduced verbatim under
-[Multi-task](#multi-task-the-five-mikasa-robo-training-tasks) above; config C is B with
-`--tbptt-length 2 --grad-accumulation-steps 4` substituted.
+Read those three scripts before writing your own: they are the authoritative invocations,
+and their header comments explain the budget matching in detail. Configs A and B are
+reproduced verbatim under [Multi-task](#multi-task-the-five-mikasa-robo-training-tasks)
+above; config C is B with `--tbptt-length 2 --grad-accumulation-steps 4` substituted.
 
-On the cluster these were submitted as batch jobs, but the job descriptor carried nothing
-beyond the invocation above, so running it on any 8-GPU node does the same work.
+On the cluster the runs were submitted as cryri jobs rather than started interactively.
+The `jobs/*.yaml` next to the scripts are the descriptors — image, region `SR008`,
+instance `a100plus.8gpu.80vG.96C.1456G`, one worker, `medium` priority — and the submit
+command was
 
-### v2: stabilized memory hyperparameters
+```bash
+/home/jovyan/users/echerepanov/cry jobs/train_config_b_mem.yaml    # machine-specific path
+```
 
-The first campaign above (`memory_write_scale=5.8`, `memory_init_std=4.0`) trained, but
-the memory runs were not healthy. `mem_in_norm` settles at `~101 * memory_write_scale`
-regardless of `memory_init_std`, so at `ws=5.8` the memory readout sits at norm ~563
-against ~188/~439 for the image/language embeddings. RMSNorm's backward attenuates
-gradient into a token as `1/||x||`, so the largest token in the prefix gets the least
-gradient: `initial_memory` moved `|dx|/|x| = 0.05%` over 24k microsteps, and 97% of
+where `cry` is the site's cryri wrapper and lives outside this repository. Nothing in the
+training code needs it: each yaml's `command:` is just `bash jobs/train_config_<x>.sh`, and
+running that script on any 8-GPU node does the same work. The scripts hardcode
+`ROOT=/home/jovyan/users/echerepanov/pi05-mem` through `jobs/common.sh`; that one line is
+what has to change on another machine.
+
+### v2: stabilized memory hyperparameters (configs A/B/C v2)
+
+The first campaign (configs A/B/C above, `memory_write_scale=5.8`, `memory_init_std=4.0`)
+trained, but the memory runs were not healthy: `mem_in_norm` settles at
+`~101 * memory_write_scale` regardless of `memory_init_std` (measured with
+`scripts/probe_table.py`), so at `ws=5.8` the memory readout sits at norm ~563 against
+~188/~439 for the image/language embeddings. RMSNorm's backward attenuates gradient into
+a token as `1/||x||`, so the largest token in the prefix gets the least gradient:
+`initial_memory` moved `|dx|/|x| = 0.05%` over 24k microsteps (`||x||=1445.88` at both
+step 12000 and step 36000, versus its `4.0*sqrt(64*2048)=1448` initialization), and 97% of
 optimizer steps hit `--max-grad-norm 1.0` with a clip factor varying 1.15-6.4x, so the
 configured LR schedule was not the one actually applied. `--tbptt-length 8` and `2` were
 statistically indistinguishable (loss 0.0375 vs 0.0389) - consistent with a memory state
-that carries variance but received too little gradient to make the K-step credit
-assignment matter.
+that carries variance but does not receive a training signal to *use* the K-step credit
+assignment. Full measurement: `projects/pi05-mem/JOURNAL.md`, entry "почему память не
+учится: разбор по кривым обучения".
 
-v2 changes four things, all existing knobs, no change to the write rule itself:
+v2 changes four things, all existing knobs, no code changes to the write rule itself:
 
 | change | v1 | v2 | why |
 |---|---|---|---|
@@ -603,71 +614,44 @@ v2 changes four things, all existing knobs, no change to the write rule itself:
 | `--learning-rate` | `2.5e-5` | `5e-5` | |
 
 A controlled 200-step pair on the v1 code path already pointed this way before v2 was
-run: `ws=1.0, init=0.02` against `ws=5.8, init=4.0` (otherwise identical, 4 memory tokens,
-one task) gave loss -6.3%, grad-norm p50 -18%, p90 -30%. That is directional evidence at
-small scale, not a magnitude guarantee at the full 64-token five-task mixture - which is
-what the v2 runs exist to check.
+run: `diag-quiet` (`ws=1.0, init=0.02`) against `diag-k1` (`ws=5.8, init=4.0`, otherwise
+identical) gave loss -6.3%, grad-norm p50 -18%, p90 -30%. That pair used 4 memory tokens
+and one task, not the full 64-token five-task mixture, so it is directional evidence, not
+a magnitude guarantee - which is what the v2 runs below exist to check at full scale.
 
-`--freeze-vision-encoder` is new in this campaign: `PI05Config` already carried the field
-(`freeze_vision_encoder`, acted on by `PaliGemmaWithExpertModel._set_requires_grad`), but
-`train.py` never surfaced it on the command line. It now does, the same way
-`--gradient-checkpointing` does - set on `policy_config` before `make_policy` builds the
-model, since the flag is only read once, in `PaliGemmaWithExpertModel.__init__`.
+`--freeze-vision-encoder` was not a flag before this campaign: `PI05Config` already had
+the field (`freeze_vision_encoder`, acted on by
+`PaliGemmaWithExpertModel._set_requires_grad`), but `train.py` never surfaced it. It now
+does, the same way `--gradient-checkpointing` does - set on `policy_config` before
+`make_policy` builds the model, since the flag is only read once, in
+`PaliGemmaWithExpertModel.__init__`.
 
 v2 also targets a fixed **optimizer-step** count (15000) rather than a fixed frame count,
 in preparation for matching mu-VLA(openvla-oft)'s update count in a later campaign.
-`--grad-accumulation-steps 1` on all three configs is deliberate here: unlike A/B/C
-above, the v2 configs are **not** matched to each other on samples-per-update (K changes
-the effective batch: A sees 32 samples/update, C 64, B 256). Matching update *counts* to
-openvla-oft, and separately samples-per-update across A/B/C, is future work - see
-`train.py`'s `effective_accum_steps = effective_tbptt_length * grad_accumulation_steps`
-and `total_optimizer_steps = max_steps // effective_accum_steps` for the arithmetic a
-future campaign has to use.
+`--grad-accumulation-steps 1` on all three configs is deliberate here, not an oversight:
+unlike A/B/C v1, the v2 configs are **not** matched to each other on samples-per-update
+(K changes the effective batch: A sees 32 samples/update, C 64, B 256). Matching update
+*counts* to openvla-oft's 92500 optimizer steps, and separately samples-per-update across
+A/B/C, is future work - see `train.py`'s `effective_accum_steps = effective_tbptt_length *
+grad_accumulation_steps` and `total_optimizer_steps = max_steps // effective_accum_steps`
+for the arithmetic a future campaign has to use.
 
-| config | K | `--max-steps` (microsteps) | optimizer steps | samples/update |
+| script | K | `--max-steps` (microsteps) | optimizer steps | samples/update |
 |---|---|---|---|---|
-| A v2 (no memory) | - | 15000 | 15000 | 32 |
-| B v2 (memory) | 8 | 120000 | 15000 | 256 |
-| C v2 (memory) | 2 | 30000 | 15000 | 64 |
+| `jobs/train_config_a_nomem_v2.sh` | - (no memory) | 15000 | 15000 | 32 |
+| `jobs/train_config_b_mem_v2.sh` | 8 | 120000 | 15000 | 256 |
+| `jobs/train_config_c_mem_k2_v2.sh` | 2 | 30000 | 15000 | 64 |
 
 All three: `--pretrained lerobot/pi05_base`, `--learning-rate 5e-5`,
 `--lr-warmup-steps 750` (5% of the 15000 optimizer steps, same ratio as v1's
-`300/6000`), `--lr-min-ratio 0.1`, `--freeze-vision-encoder`, `--seed 42`; B v2 and C v2
-also carry `--memory-write-scale 1.0 --memory-init-std 0.02`. B v2, for example:
+`300/6000`), `--lr-min-ratio 0.1`, `--freeze-vision-encoder`, `--seed 42`; B and C also
+carry `--memory-write-scale 1.0 --memory-init-std 0.02`. Submitted the same way as v1:
 
 ```bash
-.venv/bin/torchrun --standalone --nnodes 1 --nproc-per-node 8 \
-    -m pi05_mem.train \
-    --pretrained lerobot/pi05_base \
-    --data-root "$PWD/data" \
-    --data "$TRAIN_TASKS" \
-    --output runs/config-b-mem-v2 \
-    --batch-size 4 \
-    --grad-accumulation-steps 1 \
-    --action-horizon 5 \
-    --max-steps 120000 \
-    --learning-rate 5e-5 \
-    --lr-schedule cosine \
-    --lr-warmup-steps 750 \
-    --lr-min-ratio 0.1 \
-    --max-grad-norm 1.0 \
-    --dtype bfloat16 \
-    --gradient-checkpointing \
-    --freeze-vision-encoder \
-    --seed 42 \
-    --use-memory \
-    --num-mem-tokens 64 \
-    --memory-update tbptt \
-    --tbptt-length 8 \
-    --attention-mask-mode custom \
-    --memory-write-scale 1.0 \
-    --memory-init-std 0.02 \
-    --log-freq 20 \
-    --save-freq 30000
+/home/jovyan/users/echerepanov/cry jobs/train_config_a_nomem_v2.yaml
+/home/jovyan/users/echerepanov/cry jobs/train_config_b_mem_v2.yaml
+/home/jovyan/users/echerepanov/cry jobs/train_config_c_mem_k2_v2.yaml
 ```
-
-A v2 drops the memory flags and adds `--grad-accumulation-steps 1 --max-steps 15000`; C
-v2 is B v2 with `--tbptt-length 2 --max-steps 30000` substituted.
 
 ### Other flags worth knowing
 
@@ -692,12 +676,12 @@ configures itself and cannot silently disagree with training.
 
 | flag | default | what it does |
 |---|---|---|
-| `--use-memory` | off | Master switch. Off ⇒ no MEM tokens, no memory module, prefix bit-identical to stock pi0.5, every other memory flag inert. |
+| `--use-memory` | off | Master switch. Off ⇒ no MEM tokens, no memory module, prefix bit-identical to stock π₀.₅, every other memory flag inert. |
 | `--num-mem-tokens N` | `4` | How many MEM vectors are injected. mu-VLA used 64, and so do configs B and C; the default of 4 was chosen for cost, not for quality. Cost is linear in added prefix length. |
 | `--memory-update {tbptt,ema}` | `tbptt` | Cross-step update rule. `tbptt` keeps the autograd graph for K steps and detaches at the boundary; `ema` builds no cross-step graph at all. |
 | `--tbptt-length K` | `2` | TBPTT truncation length: gradient flows through K environment steps. Ignored under `ema`. **Also sets the number of microsteps per optimizer step** — see `effective_accum_steps` above; a K sweep must compensate with `--grad-accumulation-steps` or it silently changes the effective batch and the schedule length too. |
 | `--ema-alpha A` | `0.1` | Only under `--memory-update ema`: `M_in[t+1] = A*M_out[t] + (1-A)*M_in[t]`, both operands detached. `A=1` reproduces TBPTT with K=1; `A=0` freezes memory. |
-| `--attention-mask-mode {custom,full}` | `custom` | `custom` = pi0.5's native block mask, nothing patched, prefix KV cache usable. `full` = ablation opening the MEM rows onto the action suffix, which disables the prefix cache and makes inference ~`num_inference_steps`× slower. |
+| `--attention-mask-mode {custom,full}` | `custom` | `custom` = π₀.₅'s native block mask, nothing patched, prefix KV cache usable. `full` = ablation opening the MEM rows onto the action suffix, which disables the prefix cache and makes inference ~`num_inference_steps`× slower. |
 | `--memory-write-scale S` | `5.8` | Multiplier on the MEM readout before it becomes the next step's input embedding. Compensates for PaliGemma's missing `sqrt(width)` input multiplier. `1.0` gives verbatim mu-VLA feedback. Re-measure with `scripts/probe_embed_scale.py` for a different backbone. |
 | `--memory-init-std σ` | `4.0` | Std of the learnable `initial_memory`. mu-VLA used `0.02` (Llama input-embedding scale); `4.0` matches PaliGemma's image-embedding scale. |
 | `--memory-log-freq N` | `0` (off) | Cheap memory diagnostics every N gradient steps: memory norms, `initial_memory_grad_norm`. The real jobs use 100. |
@@ -709,7 +693,7 @@ Three more settings are memory-critical but belong to the policy config rather t
 | config field | value here | why |
 |---|---|---|
 | `n_action_steps` | `1` | Forced by receding horizon: one env step = one forward = one memory update. `select_action` **raises** if this is > 1 while memory is on. Do not change it while memory is enabled — it is not a setting, it is a bug, and the code treats it as one. |
-| `chunk_size` | `5`, set by `--action-horizon` | Stock pi0.5 predicts 50 actions; MIKASA episodes are 11–20 steps and only the first action is ever executed, so 50 would be 10× the attention cost for nothing. Freely tunable. |
+| `chunk_size` | `5`, set by `--action-horizon` | Stock π₀.₅ predicts 50 actions; MIKASA episodes are 11–20 steps and only the first action is ever executed, so 50 would be 10× the attention cost for nothing. Freely tunable. |
 | `receding_horizon` | `None` = auto | On iff `use_memory` is on (mu-VLA's rule). Not a training flag; the eval entry points can override it per run with `--receding-horizon {auto,true,false}`. |
 
 **Safe-to-tune summary.** `use_memory`, `num_mem_tokens`, `memory_update`, `ema_alpha`,
@@ -729,7 +713,7 @@ Into `--output`:
 | `ddp_check.json` | evidence that the ranks walked different trajectories. |
 | `step-NNNNNN/`, `final/` | checkpoints; `--save-freq` controls the intermediates. |
 
-There is **no wandb** — it is explicitly disabled by the exports above, and metrics go to
+There is **no wandb** — it is explicitly disabled in `jobs/common.sh`, and metrics go to
 stdout and to `metrics.jsonl`. `python scripts/inspect_metrics.py runs/<name>` prints a
 quick read-out: number of steps, episode resets, memory norms, on how many logged steps
 `initial_memory` actually received gradient, and first-10 vs last-10 loss.
@@ -756,9 +740,10 @@ inference regime.
 ### One environment
 
 ```bash
-source scripts/eval_env.sh mikasa     # Vulkan ICD, PhysX cache, asset caches, PYTHONPATH
+source jobs/common.sh                 # $ROOT, $PY, $TRAIN_TASKS, caches, no-wandb
+source scripts/eval_env.sh mikasa     # Vulkan ICD, PhysX cache, PYTHONPATH
 
-.venv/bin/python -m pi05_mem.eval.run_eval \
+"$PY" -m pi05_mem.eval.run_eval \
     --env mikasa --env-id RememberColor3-VLA-v0 \
     --checkpoint runs/config-b-mem/final \
     --data-root data --data "$TRAIN_TASKS" \
@@ -769,7 +754,7 @@ source scripts/eval_env.sh mikasa     # Vulkan ICD, PhysX cache, asset caches, P
 ```
 
 `--data` must name **the same mixture the checkpoint was trained on**. It is what fixes the
-normalization quantiles, and pi0.5 writes the normalized state into the text prompt, so a
+normalization quantiles, and π₀.₅ writes the normalized state into the text prompt, so a
 different mixture is literally a differently-conditioned policy.
 
 `--receding-horizon {auto,true,false}`: `auto` = on iff the checkpoint has memory (this
@@ -807,28 +792,21 @@ The same is true if videos were requested and none could be written.
 ### The full 23-task suite
 
 ```bash
-source scripts/eval_env.sh mikasa
-
-.venv/bin/python -m pi05_mem.eval.suite \
-    --checkpoint runs/config-b-mem/final \
-    --data-root data --data "$TRAIN_TASKS" \
-    --output eval_results/config-b-mem_rh-true \
-    --num-trials 100 --seed 4242424242 \
-    --receding-horizon auto \
-    --videos-per-env 5 \
-    --env-timeout 7200
+bash jobs/eval_suite.sh <run-name> <true|false> [num-trials]
+# e.g.
+bash jobs/eval_suite.sh config-b-mem true 100
+bash jobs/eval_suite.sh config-a-nomem false 100
 ```
 
-The baseline is the same command with `--checkpoint runs/config-a-nomem/final`,
-`--receding-horizon false` and `--output eval_results/config-a-nomem_rh-false`.
+`<run-name>` is a directory under `runs/`. The checkpoint is `runs/<name>/final` and
+nothing else: quietly falling back to the newest `step-*` would produce a table that looks
+like a controlled comparison but compares two configurations at different training budgets.
+To evaluate an intermediate checkpoint on purpose, name it —
+`EVAL_CHECKPOINT=$ROOT/runs/<name>/step-004000 bash jobs/eval_suite.sh ...` — which also
+gives it a `_`-prefixed output tag so it stays out of the final table. Results land in
+`eval_results/<run-name>_rh-<true|false>/`.
 
-Point `--checkpoint` at `runs/<name>/final` and nothing else: quietly falling back to the
-newest `step-*` would produce a table that looks like a controlled comparison but compares
-two configurations at different training budgets. To evaluate an intermediate checkpoint
-on purpose, name it explicitly, and prefix its `--output` directory with `_` so that
-`build_summary.py` treats it as scratch and leaves it out of the final table.
-
-`pi05_mem.eval.suite`:
+Underneath it is `python -m pi05_mem.eval.suite`, which:
 
 * runs the 23 MIKASA tasks of mu-VLA's protocol (100 trials each, seed 4242424242) —
   5 of them are the training tasks and **18 are held out**, which is where a memory
@@ -838,8 +816,8 @@ on purpose, name it explicitly, and prefix its `--output` directory with `_` so 
 * **resumes** — an environment with a valid `result.json` is skipped, but only if that
   result answers the same question (same checkpoint, seed, dtype, data mixture, trial
   count, video request);
-* reclaims a wedged environment after `--env-timeout` (the 7200 s above is a measured
-  value: the longest task's 100 episodes take ~32 min);
+* reclaims a wedged environment after `--env-timeout` (the job script passes 7200 s, a
+  measured value: the longest task's 100 episodes take ~32 min);
 * refuses to guess how many GPUs it has — pass `--gpus 0,1,...` if enumeration fails,
   rather than silently serialising 23 environments onto one device.
 
@@ -873,17 +851,17 @@ apart.
 
 ### Troubleshooting: the two caches an ephemeral `$HOME` takes with it
 
-Both failures below hit real evaluation suites, and both have one root cause: inside a
-cluster job `$HOME` is ephemeral, so anything a library caches under `~` is missing again
-on the next job. `scripts/eval_env.sh mikasa` handles both; read this if you run the
-simulator without it, or on another machine.
+Both failures below hit the evaluation suites of 2026-07-26, and both have one root cause:
+inside a cryri job `$HOME` is an ephemeral `/home/user`, so anything a library caches under
+`~` is missing again on the next job. `scripts/eval_env.sh mikasa` handles both; read this
+if you run the simulator without it, or on another machine.
 
 **`EOFError: EOF when reading a line`, and the three `ShellGame*-VLA-v0` environments die
 at startup.** They are registered with `asset_download_ids=["ycb"]` and read
 `ASSET_DIR/assets/mani_skill2_ycb/info_pick_v0.json`; ManiSkill looks under `~/.maniskill`,
 does not find the asset, and calls `prompt_yes_no` — that is, `input()` — on a non-TTY
-stdin. `eval_env.sh` exports `MS_ASSET_DIR="$PI05_MEM/.cache/maniskill"` so the asset lives on a
-persistent volume instead, and `MS_SKIP_ASSET_DOWNLOAD_PROMPT=1`, which makes `prompt_yes_no` return
+stdin. `eval_env.sh` exports `MS_ASSET_DIR="$PI05_MEM/.cache/maniskill"` so the asset lives
+on NFS instead, and `MS_SKIP_ASSET_DOWNLOAD_PROMPT=1`, which makes `prompt_yes_no` return
 `True` instead of reading stdin — so a *future* asset gap costs a slow environment rather
 than a dead suite. Fetch the asset once, ahead of time:
 
@@ -909,8 +887,8 @@ so `SAPIEN_PHYSX_CACHE_ROOT` does **not** redirect it — that variable is the P
 cache, a different thing. The suite starts one process per GPU at the same moment; all of
 them find the library missing, all of them download it to the same path, and the ones that
 lose the race `dlopen` a partially written file. That destroyed 12 of 23 environments in
-`config-a-nomem_rh-false`. Populate a persistent copy once, from a single process, before
-any suite:
+`config-a-nomem_rh-false`. Populate an NFS copy once, from a single process, before any
+suite:
 
 ```bash
 bash scripts/seed_physx.sh    # idempotent: a no-op once the cached file is complete
@@ -948,10 +926,11 @@ step"* (`mikasa_robo_utils.py:399`) — and mu-VLA's loop honours it
 
 **If you write your own rollout loop against MIKASA-Robo, call `env.render()` after every
 `env.step()`, unconditionally** — not only on the episodes you are recording, or the recorded
-ones get different physics from the rest. `eval/rollout.py` here does exactly that:
-render once per step, after the step, whether or not a video is being written. Its
-regression test needs a negative control — without rendering, Push/Pick *must* fail —
-because a test that only checks the fixed path would prove nothing.
+ones get different physics from the rest. `eval/rollout.py` here does exactly that;
+`tests/test_rollout_render_contract.py` pins it (render happens once per step, after the
+step, whether or not a video is being written), and `my_tmp/test_shellgame_render.py` is the
+GPU regression, with the negative control that without rendering Push/Pick *must* fail — a
+test that only checks the fixed path would prove nothing.
 
 Symptom-to-cause table for the three ShellGame failures, since they look alike from the
 outside:
@@ -967,11 +946,16 @@ with the same environments: demonstration collection runs with `num_envs=10`, an
 `reconfiguration_freq` is 0 when `num_envs > 1`, so `goal_site` is hidden once instead of
 per episode and the bad global apply does not recur.
 
-## What is verified, and how
+## Tests
 
-The project's pytest suite is not part of this public snapshot, but the invariants it pins
-are the ones to re-check against any change, because they pin behaviour rather than "the
-code runs". On the model side, with the real weights built on a GPU:
+```bash
+export PYTHONPATH=$PWD/src
+.venv/bin/python -m pytest tests -q                # CPU suite
+.venv/bin/python -m pytest tests -q --run-slow     # + GPU tests that build the real model
+```
+
+Without `--run-slow` the GPU tests are skipped. The GPU ones are the tests that matter,
+because they pin invariants rather than "the code runs":
 
 * MEM tokens land between the image and the language embeddings, at the expected prefix
   positions;
@@ -985,10 +969,11 @@ code runs". On the model side, with the real weights built on a GPU:
 * `select_action` refuses a multi-step action queue while memory is on;
 * with `use_memory=False` the prefix reproduces stock `PI05Pytorch.embed_prefix` exactly.
 
-And on the CPU side: stream time-coherence, episode-boundary handling and action-chunk
-padding in the episodic dataset; mixture weights and the exactness of the pooled
-statistics; the evaluation guards and the resume logic; the render-once-per-step contract
-of the rollout loop; and the complete-case aggregation of `build_summary.py`.
+On the CPU side, `tests/test_episodic_dataset.py` and `tests/test_multitask_dataset.py`
+pin stream time-coherence, episode-boundary handling, action-chunk padding, mixture
+weights and the pooled statistics; `tests/test_eval_suite*.py` and
+`tests/test_rollout_accounting.py` pin the evaluation guards and the resume logic;
+`tests/test_build_summary.py` pins the complete-case aggregation.
 
 ## Repository layout
 
@@ -1014,46 +999,29 @@ src/pi05_mem/
     rollout.py                one episode, with the memory accounting
     loader.py                 load a checkpoint together with its memory config
     gym_compat.py             the gymnasium 1.x Wrapper.__getattr__ shim
-scripts/        environment setup, probes, statistics, summary and report building
-assets/         the verified PaliGemma tokenizer     (fetched, not committed)
-data/           LeRobot v3 datasets, + cache/*.npy   (downloaded, not committed)
-runs/           training outputs                     (not committed)
-eval_results/   one directory per (run, regime)      (not committed)
+jobs/           the invocations actually used: train A/B/C, eval suite, cryri yamls
+scripts/        setup, probes, diagnostics, summary building
+tests/          pytest suite (CPU by default; --run-slow adds the GPU tests)
+docs/           long-form documentation
+assets/         the verified PaliGemma tokenizer
+data/           LeRobot v3 datasets (+ cache/*.npy pre-decoded frames)
+runs/           training outputs
+eval_results/   evaluation outputs, one directory per (run, inference regime)
 ```
-
-Not in this public snapshot: the pytest suite, the cluster job descriptors and the
-long-form design documents. Everything needed to train and evaluate is here — the commands
-in this README are the invocations those job scripts wrapped, written out in full.
 
 ## Where the deeper documentation lives
 
+* **[`docs/multitask-dataloader.md`](docs/multitask-dataloader.md)** — the streaming
+  dataloader, multi-task mixing, pooled normalization statistics, and the test that pins
+  each property.
 * **The module docstrings are load-bearing.** `configuration_pi05_mem.py` documents every
-  parameter and why its default is what it is; `episodic_dataset.py`, `shard.py` and
-  `dataset_stats.py` document the streaming dataloader, multi-task mixing and the pooled
-  normalization statistics; `suite.py`, `run_eval.py` and `build_summary.py` document
-  every guard and the failure it exists to prevent.
+  parameter and why its default is what it is; `suite.py`, `run_eval.py` and
+  `build_summary.py` document every guard and the failure it exists to prevent.
 * Four long-form reports (in Russian) were written for this project and live with the
   maintainer's project notes rather than in the repository: the architecture and the list
   of modifications; every new parameter with its motivation; the MIKASA experiment
   protocol; and the multi-task dataloader. Ask for them if you need the reasoning behind a
   design choice that the code comments do not already cover.
-
-## Licence and attribution
-
-This repository is MIT-licensed, see [`LICENSE`](LICENSE).
-
-`src/pi05_mem/modeling_pi05_mem.py`, `src/pi05_mem/processor_pi05_mem.py` and
-`src/pi05_mem/configuration_pi05_mem.py` are **derived from**
-[HuggingFace LeRobot](https://github.com/huggingface/lerobot), which is Apache-2.0: they
-subclass `PI05Pytorch` / `PI05Policy` / `PI05Config` and reproduce parts of
-`lerobot.policies.pi05`. Those three files carry the upstream Apache-2.0 notice at the
-top, and the Apache-2.0 terms continue to apply to the upstream portions.
-
-The memory mechanism follows *mu-VLA*, itself a fork of OpenVLA-OFT, and the observation
-and action conventions in `src/pi05_mem/eval/envs.py` are taken from mu-VLA's MIKASA-Robo
-eval scripts. Neither is vendored here; both remain under their own licences. The base
-checkpoint `lerobot/pi05_base`, the PaliGemma tokenizer and the MIKASA-Robo datasets are
-downloaded at setup time and are covered by their own terms.
 
 ## Known limitations
 
@@ -1066,9 +1034,9 @@ downloaded at setup time and are covered by their own terms.
   matching than the corresponding mode was in OpenVLA-OFT. It exists for ablation parity.
 * MIKASA episodes are 11–20 steps at fps=10, i.e. 1–2 seconds. The memory horizon that can
   be demonstrated on this data is bounded by that.
-* LIBERO support was only ever exercised on about 3% of one dataset (14 complete
-  episodes) and is a smoke test. Those `q01`/`q99` were computed from that 3%; re-run
-  `scripts/augment_quantile_stats.py --force` after fetching more.
+* The bundled LIBERO dataset is about 3% downloaded (14 complete episodes) and is a smoke
+  test only. Its `q01`/`q99` were computed from that 3%; re-run
+  `scripts/augment_quantile_stats.py --force` if more of it is ever fetched.
 * **No success rates are quoted anywhere in this README, deliberately.** The evaluation
   suites were still running when it was written. Read them out of
   `eval_results/comparison.csv` once they finish.
