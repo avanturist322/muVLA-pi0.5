@@ -457,7 +457,7 @@ export TRAIN_TASKS=shell_game_push_vla_v0,intercept_medium_vla_v0,remember_color
 
 The v3 campaign below shows the two invocations that ran on 8×H100.
 (A third config B with K=8 was also submitted in parallel; only A and C are shown here.)
-**v3 changes:** batch_size doubled to 64 per rank (global batch 512), action_horizon increased to 8.
+**v3 changes:** action_horizon increased to 8 (batch_size=8 per rank, global batch 64 like v2).
 
 **Plain pi0.5 — memory off (config A v3, the baseline):**
 
@@ -468,7 +468,7 @@ The v3 campaign below shows the two invocations that ran on 8×H100.
     --data-root "$PWD/data" \
     --data "$TRAIN_TASKS" \
     --output runs/config-a-nomem-v3 \
-    --batch-size 64 \
+    --batch-size 8 \
     --grad-accumulation-steps 1 \
     --action-horizon 8 \
     --max-steps 15000 \
@@ -494,7 +494,7 @@ The v3 campaign below shows the two invocations that ran on 8×H100.
     --data-root "$PWD/data" \
     --data "$TRAIN_TASKS" \
     --output runs/config-c-mem-k2-v3 \
-    --batch-size 64 \
+    --batch-size 8 \
     --grad-accumulation-steps 1 \
     --action-horizon 8 \
     --max-steps 30000 \
