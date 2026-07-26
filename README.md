@@ -455,10 +455,11 @@ mixture of the experiment is the one exported as `$TRAIN_TASKS` by `jobs/common.
 export TRAIN_TASKS=shell_game_push_vla_v0,intercept_medium_vla_v0,remember_color_5_vla_v0,take_it_back_vla_v0,remember_shape_and_color_3x3_vla_v0
 ```
 
-The v2 campaign below shows the two invocations that ran on 8×H100.
+The v3 campaign below shows the two invocations that ran on 8×H100.
 (A third config B with K=8 was also submitted in parallel; only A and C are shown here.)
+**v3 changes:** batch_size doubled to 64 per rank (global batch 512), action_horizon increased to 8.
 
-**Plain π₀.₅ — memory off (config A v2, the baseline):**
+**Plain π₀.₅ — memory off (config A v3, the baseline):**
 
 ```bash
 .venv/bin/torchrun --standalone --nnodes 1 --nproc-per-node 8 \
@@ -466,10 +467,10 @@ The v2 campaign below shows the two invocations that ran on 8×H100.
     --pretrained lerobot/pi05_base \
     --data-root "$PWD/data" \
     --data "$TRAIN_TASKS" \
-    --output runs/config-a-nomem-v2 \
-    --batch-size 4 \
+    --output runs/config-a-nomem-v3 \
+    --batch-size 64 \
     --grad-accumulation-steps 1 \
-    --action-horizon 5 \
+    --action-horizon 8 \
     --max-steps 15000 \
     --learning-rate 5e-5 \
     --lr-schedule cosine \
@@ -484,7 +485,7 @@ The v2 campaign below shows the two invocations that ran on 8×H100.
     --save-freq 3750
 ```
 
-**mu-VLA(π₀.₅) — memory on, K=2 (config C v2):**
+**mu-VLA(π₀.₅) — memory on, K=2 (config C v3):**
 
 ```bash
 .venv/bin/torchrun --standalone --nnodes 1 --nproc-per-node 8 \
@@ -492,10 +493,10 @@ The v2 campaign below shows the two invocations that ran on 8×H100.
     --pretrained lerobot/pi05_base \
     --data-root "$PWD/data" \
     --data "$TRAIN_TASKS" \
-    --output runs/config-c-mem-k2-v2 \
-    --batch-size 4 \
+    --output runs/config-c-mem-k2-v3 \
+    --batch-size 64 \
     --grad-accumulation-steps 1 \
-    --action-horizon 5 \
+    --action-horizon 8 \
     --max-steps 30000 \
     --learning-rate 5e-5 \
     --lr-schedule cosine \
@@ -517,7 +518,7 @@ The v2 campaign below shows the two invocations that ran on 8×H100.
     --save-freq 7500
 ```
 
-Both v2 runs consume the same 1.53M frames in exactly **15000 optimizer steps** at
+Both v3 runs consume the same 1.53M frames in exactly **15000 optimizer steps** at
 an effective batch of 32 (A) and 64 (C) respectively. `runs/<name>/train_config.json` records the resolved
 configuration of each, which is the thing to compare if in doubt.
 
