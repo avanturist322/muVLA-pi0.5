@@ -1,0 +1,72 @@
+# Everything here is either large, machine-specific, or re-creatable from a script in
+# this repository. What is tracked is source and the documentation.
+
+# --- environments and vendored source ---------------------------------------
+# .venv is built by setup_env.sh; .vendor/lerobot is a git clone it makes.
+.venv/
+.vendor/
+
+# --- caches ------------------------------------------------------------------
+# .cache/ holds HF_HOME, the triton/inductor caches and the sapien PhysX cache, all
+# pinned inside the project root because $HOME is ephemeral in the training container.
+.cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# --- data --------------------------------------------------------------------
+# LeRobot v3 datasets, fetched with download_data.sh, plus the .npy frame caches that
+# scripts/predecode_videos.py writes next to them and the pooled-statistics cache.
+data/
+*.npy
+_combined_stats_*.json
+
+# --- model artifacts ---------------------------------------------------------
+# runs/ is checkpoints: ~219 GB, 8.9 GB of safetensors per final/.
+runs/
+outputs/
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+
+# The PaliGemma tokenizer, ~21 MB of third-party binary. scripts/fetch_tokenizer.py
+# downloads it and verifies it by sha256, which is the supported way to get it.
+assets/
+
+# --- run output --------------------------------------------------------------
+# Per-episode logs, rollout videos and result JSONs of the evaluation suites.
+# The glob, not the bare directory: a re-measurement is written *beside* the previous
+# one rather than over it, so a second campaign lands in eval_results_v2/ - several
+# thousand files and their mp4s, which `eval_results/` would not have covered.
+eval_results*/
+*.mp4
+
+# stdout of long-running jobs; every path in them is machine-specific.
+logs/
+*.log
+nohup.out
+
+# Scratch directories, never part of the deliverable.
+my_tmp/
+tmp/
+
+# --- secrets ------------------------------------------------------------------
+# Nothing of the sort is committed here; this is a guard, not a description.
+.env
+.env.*
+*.secrets.env
+.secrets*
+*.pem
+*.key
+credentials*.json
+id_rsa*
+
+# --- editor / OS ---------------------------------------------------------------
+.DS_Store
+.vscode/
+.idea/
+*.swp
