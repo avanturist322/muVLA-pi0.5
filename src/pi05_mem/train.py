@@ -86,6 +86,11 @@ class TrainConfig:
     device: str = "cuda"
     dtype: str = "bfloat16"
     gradient_checkpointing: bool = False
+    # Freeze the SigLIP vision tower. `PI05Config` already carries the flag and
+    # `PaliGemmaWithExpertModel._set_requires_grad` acts on it; this only surfaces it
+    # on the command line. The tower is also kept in eval() by the base class's
+    # `train()` override, so its dropout/BN state does not move either.
+    freeze_vision_encoder: bool = False
     max_episode_steps: int | None = None
 
     # optimizer / schedule (defaults follow LeRobot's pi0.5 preset)
@@ -174,6 +179,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--device", default="cuda")
     p.add_argument("--dtype", default="bfloat16")
     p.add_argument("--gradient-checkpointing", action="store_true")
+    p.add_argument(
+        "--freeze-vision-encoder",
+        action="store_true",
+        help="freeze the SigLIP vision tower (requires_grad=False, kept in eval mode)",
+    )
     p.add_argument("--max-episode-steps", type=int, default=None)
 
     p.add_argument("--adam-beta1", type=float, default=0.9)
@@ -360,6 +370,7 @@ def train(cfg: TrainConfig, dist_info: DistInfo | None = None) -> dict:
         **memory_kwargs,
     )
     policy_config.gradient_checkpointing = cfg.gradient_checkpointing
+    policy_config.freeze_vision_encoder = cfg.freeze_vision_encoder
     policy_config.optimizer_lr = cfg.learning_rate
 
     policy = make_policy(policy_config, pretrained=cfg.pretrained)

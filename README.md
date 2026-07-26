@@ -579,6 +579,96 @@ Configs A and B are reproduced verbatim under
 On the cluster these were submitted as batch jobs, but the job descriptor carried nothing
 beyond the invocation above, so running it on any 8-GPU node does the same work.
 
+### v2: stabilized memory hyperparameters
+
+The first campaign above (`memory_write_scale=5.8`, `memory_init_std=4.0`) trained, but
+the memory runs were not healthy. `mem_in_norm` settles at `~101 * memory_write_scale`
+regardless of `memory_init_std`, so at `ws=5.8` the memory readout sits at norm ~563
+against ~188/~439 for the image/language embeddings. RMSNorm's backward attenuates
+gradient into a token as `1/||x||`, so the largest token in the prefix gets the least
+gradient: `initial_memory` moved `|dx|/|x| = 0.05%` over 24k microsteps, and 97% of
+optimizer steps hit `--max-grad-norm 1.0` with a clip factor varying 1.15-6.4x, so the
+configured LR schedule was not the one actually applied. `--tbptt-length 8` and `2` were
+statistically indistinguishable (loss 0.0375 vs 0.0389) - consistent with a memory state
+that carries variance but received too little gradient to make the K-step credit
+assignment matter.
+
+v2 changes four things, all existing knobs, no change to the write rule itself:
+
+| change | v1 | v2 | why |
+|---|---|---|---|
+| `--memory-write-scale` | `5.8` | `1.0` | brings the memory operating point down to `~101`, in range with the other prefix tokens, so RMSNorm backward no longer strangles its gradient |
+| `--memory-init-std` | `4.0` | `0.02` | matches the lower operating point from step 0 instead of traveling `181 -> 563` over the first ~1000 steps |
+| `--freeze-vision-encoder` | off | on | removes one source of competing gradient while the memory pathway is being re-validated at the new scale |
+| `--learning-rate` | `2.5e-5` | `5e-5` | |
+
+A controlled 200-step pair on the v1 code path already pointed this way before v2 was
+run: `ws=1.0, init=0.02` against `ws=5.8, init=4.0` (otherwise identical, 4 memory tokens,
+one task) gave loss -6.3%, grad-norm p50 -18%, p90 -30%. That is directional evidence at
+small scale, not a magnitude guarantee at the full 64-token five-task mixture - which is
+what the v2 runs exist to check.
+
+`--freeze-vision-encoder` is new in this campaign: `PI05Config` already carried the field
+(`freeze_vision_encoder`, acted on by `PaliGemmaWithExpertModel._set_requires_grad`), but
+`train.py` never surfaced it on the command line. It now does, the same way
+`--gradient-checkpointing` does - set on `policy_config` before `make_policy` builds the
+model, since the flag is only read once, in `PaliGemmaWithExpertModel.__init__`.
+
+v2 also targets a fixed **optimizer-step** count (15000) rather than a fixed frame count,
+in preparation for matching mu-VLA(openvla-oft)'s update count in a later campaign.
+`--grad-accumulation-steps 1` on all three configs is deliberate here: unlike A/B/C
+above, the v2 configs are **not** matched to each other on samples-per-update (K changes
+the effective batch: A sees 32 samples/update, C 64, B 256). Matching update *counts* to
+openvla-oft, and separately samples-per-update across A/B/C, is future work - see
+`train.py`'s `effective_accum_steps = effective_tbptt_length * grad_accumulation_steps`
+and `total_optimizer_steps = max_steps // effective_accum_steps` for the arithmetic a
+future campaign has to use.
+
+| config | K | `--max-steps` (microsteps) | optimizer steps | samples/update |
+|---|---|---|---|---|
+| A v2 (no memory) | - | 15000 | 15000 | 32 |
+| B v2 (memory) | 8 | 120000 | 15000 | 256 |
+| C v2 (memory) | 2 | 30000 | 15000 | 64 |
+
+All three: `--pretrained lerobot/pi05_base`, `--learning-rate 5e-5`,
+`--lr-warmup-steps 750` (5% of the 15000 optimizer steps, same ratio as v1's
+`300/6000`), `--lr-min-ratio 0.1`, `--freeze-vision-encoder`, `--seed 42`; B v2 and C v2
+also carry `--memory-write-scale 1.0 --memory-init-std 0.02`. B v2, for example:
+
+```bash
+.venv/bin/torchrun --standalone --nnodes 1 --nproc-per-node 8 \
+    -m pi05_mem.train \
+    --pretrained lerobot/pi05_base \
+    --data-root "$PWD/data" \
+    --data "$TRAIN_TASKS" \
+    --output runs/config-b-mem-v2 \
+    --batch-size 4 \
+    --grad-accumulation-steps 1 \
+    --action-horizon 5 \
+    --max-steps 120000 \
+    --learning-rate 5e-5 \
+    --lr-schedule cosine \
+    --lr-warmup-steps 750 \
+    --lr-min-ratio 0.1 \
+    --max-grad-norm 1.0 \
+    --dtype bfloat16 \
+    --gradient-checkpointing \
+    --freeze-vision-encoder \
+    --seed 42 \
+    --use-memory \
+    --num-mem-tokens 64 \
+    --memory-update tbptt \
+    --tbptt-length 8 \
+    --attention-mask-mode custom \
+    --memory-write-scale 1.0 \
+    --memory-init-std 0.02 \
+    --log-freq 20 \
+    --save-freq 30000
+```
+
+A v2 drops the memory flags and adds `--grad-accumulation-steps 1 --max-steps 15000`; C
+v2 is B v2 with `--tbptt-length 2 --max-steps 30000` substituted.
+
 ### Other flags worth knowing
 
 `--pretrained` (default `lerobot/pi05_base`; `none` trains from scratch), `--batch-size`,
@@ -587,7 +677,9 @@ steps), `--grad-accumulation-steps`, `--learning-rate` (2.5e-5), `--lr-schedule
 {cosine,multistep,constant}`, `--lr-warmup-steps` (counted in *optimizer* steps),
 `--lr-min-ratio`, `--num-steps-before-decay` (multistep only), `--max-grad-norm`,
 `--adam-beta1` / `--adam-beta2` / `--adam-eps`, `--weight-decay`, `--dtype`, `--device`,
-`--gradient-checkpointing`, `--max-episode-steps`, `--seed`, `--log-freq`, `--save-freq`.
+`--gradient-checkpointing`, `--freeze-vision-encoder` (SigLIP vision tower, off by
+default; used by the v2 configs below), `--max-episode-steps`, `--seed`, `--log-freq`,
+`--save-freq`.
 `python -m pi05_mem.train --help` prints the authoritative list.
 
 ## Memory-related parameters
