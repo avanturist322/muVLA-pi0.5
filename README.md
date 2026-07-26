@@ -1,21 +1,21 @@
 # pi05-mem
 
-**Recurrent memory for π₀.₅.** This repository ports the memory mechanism of *mu-VLA*
-(a fork of OpenVLA-OFT) onto LeRobot's π₀.₅ policy, then trains and evaluates the result
+**Recurrent memory for pi0.5.** This repository ports the memory mechanism of *mu-VLA*
+(a fork of OpenVLA-OFT) onto LeRobot's pi0.5 policy, then trains and evaluates the result
 on the memory-intensive robot tasks of MIKASA-Robo. The ported policy is called
-**mu-VLA(π₀.₅)** throughout.
+**mu-VLA(pi0.5)** throughout.
 
 If none of those three names mean anything yet, the 30-second version:
 
 | name | what it is |
 |---|---|
-| **π₀.₅** (pi0.5, [arXiv:2504.16054](https://arxiv.org/abs/2504.16054)) | a vision-language-action (VLA) model: a PaliGemma-2B vision-language *prefix* plus a Gemma-300M *action expert* that denoises a chunk of future actions by flow matching. The implementation used here is `lerobot.policies.pi05`. |
+| **pi0.5** (pi0.5, [arXiv:2504.16054](https://arxiv.org/abs/2504.16054)) | a vision-language-action (VLA) model: a PaliGemma-2B vision-language *prefix* plus a Gemma-300M *action expert* that denoises a chunk of future actions by flow matching. The implementation used here is `lerobot.policies.pi05`. |
 | **mu-VLA** | an OpenVLA-OFT fork that adds *recurrent memory tokens* to a VLA, so a policy can carry information across environment steps. |
 | **MIKASA-Robo** ([site](https://mikasarobo.github.io/)) | a benchmark of 23 tabletop manipulation tasks on ManiSkill 3, built so that solving them *requires* memory. |
 
 ## The problem this repo exists to solve
 
-π₀.₅ is **memoryless**. Every call to the policy sees exactly one observation: the current
+pi0.5 is **memoryless**. Every call to the policy sees exactly one observation: the current
 camera frames and the current robot state. Nothing carries over from the previous step.
 
 That is fine for "pick up the red block" and fatal for `RememberColor3-VLA-v0`, where the
@@ -24,13 +24,13 @@ disappears, and only afterwards must it reach for the cube of that colour. By th
 decision has to be made, the evidence is no longer in the observation. A memoryless policy
 can only guess.
 
-`pi05-mem` gives π₀.₅ a hidden state that survives across environment steps, using the
+`pi05-mem` gives pi0.5 a hidden state that survives across environment steps, using the
 same mechanism, the same flag names and the same defaults as mu-VLA, so a configuration
 that works in mu-VLA transfers here without translation.
 
-## mu-VLA(π₀.₅) vs plain π₀.₅, in one table
+## mu-VLA(pi0.5) vs plain pi0.5, in one table
 
-| | plain π₀.₅ | mu-VLA(π₀.₅) = this repo |
+| | plain pi0.5 | mu-VLA(pi0.5) = this repo |
 |---|---|---|
 | state across env steps | none | `num_mem_tokens` MEM vectors, carried step to step |
 | prefix sequence | `images → language (+ state token)` | `images → MEM → language (+ state token)` |
@@ -41,8 +41,8 @@ that works in mu-VLA transfers here without translation.
 | extra weights | — | one `nn.Parameter` of shape `[num_mem_tokens, 2048]` |
 
 Everything else — the flow-matching objective, the pretrained weights, the attention block
-structure, the processor pipeline — is stock π₀.₅. With `use_memory=false` this repo is
-behaviourally identical to plain π₀.₅, asserted bit-for-bit by
+structure, the processor pipeline — is stock pi0.5. With `use_memory=false` this repo is
+behaviourally identical to plain pi0.5, asserted bit-for-bit by
 `tests/test_model_memory.py::test_disabled_memory_matches_the_stock_prefix`. That
 equivalence is what makes the A/B comparison meaningful.
 
@@ -79,7 +79,7 @@ before the language tokens**:
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-The position is not arbitrary. π₀.₅ encodes the robot's proprioceptive state as a
+The position is not arbitrary. pi0.5 encodes the robot's proprioceptive state as a
 *discrete token inside the text prompt* (256 bins over quantile-normalised state), so
 "after vision, before language" is the same slot mu-VLA used (`vision/proprio → MEM → text`)
 and it keeps MEM ahead of the state token.
@@ -156,8 +156,8 @@ written to memory would contain the current step's action prediction — a quant
 does not exist in that form at inference time.
 
 In OpenVLA-OFT this had to be enforced with a hand-built additive 4D mask, because OFT
-makes the whole multimodal sequence bidirectional, action tokens included. **In π₀.₅ the
-invariant holds for free.** π₀.₅ builds its mask from a block-boundary vector (`att_masks`
+makes the whole multimodal sequence bidirectional, action tokens included. **In pi0.5 the
+invariant holds for free.** pi0.5 builds its mask from a block-boundary vector (`att_masks`
 plus `make_att_2d_masks`, copied from big_vision/openpi): a token may attend only to tokens
 whose cumulative mask is ≤ its own. The whole prefix has cumulative mask 0 and the action
 suffix has 1, so the prefix — MEM included — cannot see the suffix, and the suffix sees
@@ -172,12 +172,12 @@ everything.
 
 | `--attention-mask-mode` | behaviour |
 |---|---|
-| `custom` (default) | π₀.₅'s native block mask, unmodified. **Nothing is patched** — there is nothing to port, the target mask already is the pretrained one. The only mode compatible with prefix KV-caching at inference. |
+| `custom` (default) | pi0.5's native block mask, unmodified. **Nothing is patched** — there is nothing to port, the target mask already is the pretrained one. The only mode compatible with prefix KV-caching at inference. |
 | `full` | ablation: `_open_mem_rows_to_suffix` opens **only the MEM rows** onto the action suffix. The prefix stops being cacheable, so inference takes a joint, non-cached path (`_sample_actions_joint`), roughly `num_inference_steps`× more expensive. |
 
 Note the deliberate asymmetry: mu-VLA's `full` opened the action tokens to the *entire*
 context; here only the MEM rows are opened, because opening the whole prefix would throw
-away the KV cache and destroy the pretrained block structure π₀.₅ was trained with. Under
+away the KV cache and destroy the pretrained block structure pi0.5 was trained with. Under
 flow matching the suffix at `t=1` is pure noise anyway, so `full` is semantically weaker
 here than it was in OFT. **Use `custom` unless you are deliberately running the ablation.**
 
@@ -198,7 +198,7 @@ The number of flow-matching denoising steps (`num_inference_steps=10`) does **no
 this: memory is read once from `prefix_out`, before denoising begins.
 
 Because MIKASA episodes are 11–20 steps long, the policy uses `chunk_size=5`,
-`n_action_steps=1`. The stock π₀.₅ chunk of 50 is longer than an entire episode.
+`n_action_steps=1`. The stock pi0.5 chunk of 50 is longer than an entire episode.
 
 ## Why a custom training loop and dataloader
 
@@ -245,7 +245,7 @@ bash setup_env.sh
 This creates `.venv` (Python 3.12, via `uv`), installs `torch==2.7.1` /
 `torchvision==0.22.1` from the cu126 index, clones LeRobot into `.vendor/lerobot` and
 installs it **editable with the `[pi]` extra**. LeRobot has to come from source because
-π₀.₅ is subclassed here, not merely configured. On another machine, edit the `ROOT` and
+pi0.5 is subclassed here, not merely configured. On another machine, edit the `ROOT` and
 `UV` paths at the top of the script.
 
 > **Gotcha — no `pyproject.toml`.** `pi05-mem` itself is not a packaged project; it is
@@ -264,7 +264,7 @@ installs it **editable with the `[pi]` extra**. LeRobot has to come from source 
 .venv/bin/python scripts/fetch_tokenizer.py
 ```
 
-> **Gotcha — the tokenizer is gated, and you do not need a token.** LeRobot's π₀.₅
+> **Gotcha — the tokenizer is gated, and you do not need a token.** LeRobot's pi0.5
 > processor hardcodes `google/paligemma-3b-pt-224`, a gated repo, so the pipeline cannot
 > start without an HF token. `scripts/fetch_tokenizer.py` downloads the canonical public
 > Big Vision SentencePiece model from `storage.googleapis.com`, uses its sha256 to verify
@@ -370,7 +370,7 @@ Dataset directory `data/remember_color_3_vla_v0` — 250 episodes, 3858 frames, 
 pre-decoded to `.npy` first (see [Data](#3-data)). The hyperparameters are those of the
 real 8×H100 runs; only the dataset list is narrowed to one task.
 
-**mu-VLA(π₀.₅) — memory on:**
+**mu-VLA(pi0.5) — memory on:**
 
 ```bash
 .venv/bin/torchrun --standalone --nnodes 1 --nproc-per-node 8 \
@@ -401,7 +401,7 @@ real 8×H100 runs; only the dataset list is narrowed to one task.
     --save-freq 12000
 ```
 
-**Plain π₀.₅ — memory off, same budget:**
+**Plain pi0.5 — memory off, same budget:**
 
 ```bash
 .venv/bin/torchrun --standalone --nnodes 1 --nproc-per-node 8 \
@@ -459,7 +459,7 @@ The v3 campaign below shows the two invocations that ran on 8×H100.
 (A third config B with K=8 was also submitted in parallel; only A and C are shown here.)
 **v3 changes:** batch_size doubled to 64 per rank (global batch 512), action_horizon increased to 8.
 
-**Plain π₀.₅ — memory off (config A v3, the baseline):**
+**Plain pi0.5 — memory off (config A v3, the baseline):**
 
 ```bash
 .venv/bin/torchrun --standalone --nnodes 1 --nproc-per-node 8 \
@@ -485,7 +485,7 @@ The v3 campaign below shows the two invocations that ran on 8×H100.
     --save-freq 3750
 ```
 
-**mu-VLA(π₀.₅) — memory on, K=2 (config C v3):**
+**mu-VLA(pi0.5) — memory on, K=2 (config C v3):**
 
 ```bash
 .venv/bin/torchrun --standalone --nnodes 1 --nproc-per-node 8 \
@@ -540,7 +540,7 @@ For a mixture, normalization statistics for `observation.state` and `action` are
 **exactly** from the pooled raw parquet rows of all roots and cached as
 `_combined_stats_<hash>.json` next to the datasets (delete it to force a recompute). A
 single `--data` keeps reading `meta/stats.json` verbatim. This matters more than it sounds:
-π₀.₅ discretizes the normalized state into 256 bins **inside the text prompt**, so wrong
+pi0.5 discretizes the normalized state into 256 bins **inside the text prompt**, so wrong
 quantiles are a corrupted prompt, not a mild rescaling.
 
 ### Multi-GPU
@@ -564,8 +564,8 @@ schedule, on 8×H100):
 
 | script | what it runs |
 |---|---|
-| `jobs/train_config_a_nomem.sh` | **A** — π₀.₅ **without** memory. The baseline. Uses the episodic loader anyway, for fairness, and `--grad-accumulation-steps 8`. |
-| `jobs/train_config_b_mem.sh` | **B** — mu-VLA(π₀.₅): `--num-mem-tokens 64`, TBPTT `--tbptt-length 8`, `custom` mask. K=8 already supplies the 8 microsteps per update, so no gradient accumulation. |
+| `jobs/train_config_a_nomem.sh` | **A** — pi0.5 **without** memory. The baseline. Uses the episodic loader anyway, for fairness, and `--grad-accumulation-steps 8`. |
+| `jobs/train_config_b_mem.sh` | **B** — mu-VLA(pi0.5): `--num-mem-tokens 64`, TBPTT `--tbptt-length 8`, `custom` mask. K=8 already supplies the 8 microsteps per update, so no gradient accumulation. |
 | `jobs/train_config_c_mem_k2.sh` | **C** — as B but `--tbptt-length 2` with `--grad-accumulation-steps 4`, so that **only** K differs from B. |
 
 Read those three scripts before writing your own: they are the authoritative invocations,
@@ -677,12 +677,12 @@ configures itself and cannot silently disagree with training.
 
 | flag | default | what it does |
 |---|---|---|
-| `--use-memory` | off | Master switch. Off ⇒ no MEM tokens, no memory module, prefix bit-identical to stock π₀.₅, every other memory flag inert. |
+| `--use-memory` | off | Master switch. Off ⇒ no MEM tokens, no memory module, prefix bit-identical to stock pi0.5, every other memory flag inert. |
 | `--num-mem-tokens N` | `4` | How many MEM vectors are injected. mu-VLA used 64, and so do configs B and C; the default of 4 was chosen for cost, not for quality. Cost is linear in added prefix length. |
 | `--memory-update {tbptt,ema}` | `tbptt` | Cross-step update rule. `tbptt` keeps the autograd graph for K steps and detaches at the boundary; `ema` builds no cross-step graph at all. |
 | `--tbptt-length K` | `2` | TBPTT truncation length: gradient flows through K environment steps. Ignored under `ema`. **Also sets the number of microsteps per optimizer step** — see `effective_accum_steps` above; a K sweep must compensate with `--grad-accumulation-steps` or it silently changes the effective batch and the schedule length too. |
 | `--ema-alpha A` | `0.1` | Only under `--memory-update ema`: `M_in[t+1] = A*M_out[t] + (1-A)*M_in[t]`, both operands detached. `A=1` reproduces TBPTT with K=1; `A=0` freezes memory. |
-| `--attention-mask-mode {custom,full}` | `custom` | `custom` = π₀.₅'s native block mask, nothing patched, prefix KV cache usable. `full` = ablation opening the MEM rows onto the action suffix, which disables the prefix cache and makes inference ~`num_inference_steps`× slower. |
+| `--attention-mask-mode {custom,full}` | `custom` | `custom` = pi0.5's native block mask, nothing patched, prefix KV cache usable. `full` = ablation opening the MEM rows onto the action suffix, which disables the prefix cache and makes inference ~`num_inference_steps`× slower. |
 | `--memory-write-scale S` | `5.8` | Multiplier on the MEM readout before it becomes the next step's input embedding. Compensates for PaliGemma's missing `sqrt(width)` input multiplier. `1.0` gives verbatim mu-VLA feedback. Re-measure with `scripts/probe_embed_scale.py` for a different backbone. |
 | `--memory-init-std σ` | `4.0` | Std of the learnable `initial_memory`. mu-VLA used `0.02` (Llama input-embedding scale); `4.0` matches PaliGemma's image-embedding scale. |
 | `--memory-log-freq N` | `0` (off) | Cheap memory diagnostics every N gradient steps: memory norms, `initial_memory_grad_norm`. The real jobs use 100. |
@@ -694,7 +694,7 @@ Three more settings are memory-critical but belong to the policy config rather t
 | config field | value here | why |
 |---|---|---|
 | `n_action_steps` | `1` | Forced by receding horizon: one env step = one forward = one memory update. `select_action` **raises** if this is > 1 while memory is on. Do not change it while memory is enabled — it is not a setting, it is a bug, and the code treats it as one. |
-| `chunk_size` | `5`, set by `--action-horizon` | Stock π₀.₅ predicts 50 actions; MIKASA episodes are 11–20 steps and only the first action is ever executed, so 50 would be 10× the attention cost for nothing. Freely tunable. |
+| `chunk_size` | `5`, set by `--action-horizon` | Stock pi0.5 predicts 50 actions; MIKASA episodes are 11–20 steps and only the first action is ever executed, so 50 would be 10× the attention cost for nothing. Freely tunable. |
 | `receding_horizon` | `None` = auto | On iff `use_memory` is on (mu-VLA's rule). Not a training flag; the eval entry points can override it per run with `--receding-horizon {auto,true,false}`. |
 
 **Safe-to-tune summary.** `use_memory`, `num_mem_tokens`, `memory_update`, `ema_alpha`,
@@ -755,7 +755,7 @@ source scripts/eval_env.sh mikasa     # Vulkan ICD, PhysX cache, PYTHONPATH
 ```
 
 `--data` must name **the same mixture the checkpoint was trained on**. It is what fixes the
-normalization quantiles, and π₀.₅ writes the normalized state into the text prompt, so a
+normalization quantiles, and pi0.5 writes the normalized state into the text prompt, so a
 different mixture is literally a differently-conditioned policy.
 
 `--receding-horizon {auto,true,false}`: `auto` = on iff the checkpoint has memory (this
